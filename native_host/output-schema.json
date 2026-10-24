@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "properties": {
+    "pills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "description": "Identificativo di una delle note fornite, una volta ciascuno."
+          },
+          "title": {
+            "type": "string",
+            "description": "Titolo italiano breve, massimo 120 caratteri."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Spiegazione di un solo concetto, circa 80-120 parole, massimo 1600 caratteri."
+          },
+          "example": {
+            "type": "string",
+            "description": "Esempio concreto breve supportato dalla fonte, massimo 1000 caratteri; vuoto se assente."
+          }
+        },
+        "required": [
+          "sourceId",
+          "title",
+          "summary",
+          "example"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "pills"
+  ],
+  "additionalProperties": false
+}

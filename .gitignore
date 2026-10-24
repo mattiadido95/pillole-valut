@@ -1,0 +1,26 @@
+# Local planning and orchestration state
+.planning/
+*.flow.json
+.codex/
+.agents/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+config.local.json
+native_host/config.json
+
+# Editor, OS and runtime output
+.vscode/
+.idea/
+.DS_Store
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+*.vsix

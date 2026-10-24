@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pillole dal vault</title><link rel="stylesheet" href="style.css"><script type="module" src="popup.mjs"></script></head>
+<body class="popup-body"><main class="popup">
+<header class="brand"><img src="icons/icon48.png" width="34" height="34" alt=""><span>Pillole dal vault<small>Un’idea, ogni tanto.</small></span></header>
+<div class="popup-heading"><span class="eyebrow">IL TUO PICCOLO PROMEMORIA</span><h1>La conoscenza<br>torna a trovarti.</h1></div>
+<div class="status-line"><span id="status-dot" class="dot"></span><span id="schedule-state">Caricamento…</span><span id="stock-count" class="tag">—</span></div>
+<p id="next-time" class="muted compact"></p>
+<section id="preview" class="preview" hidden><span id="preview-label" class="eyebrow"></span><h2 id="preview-title"></h2><p id="preview-summary"></p><button id="read-preview" class="text-button">Leggi la pillola <span aria-hidden="true">↗</span></button></section>
+<section id="empty" class="empty-popup" hidden><span class="empty-mark" aria-hidden="true">✦</span><p>Le tue note hanno ancora<br>qualcosa da raccontarti.</p><small>Collega il vault e prepara la prima scorta.</small></section>
+<p id="notice" class="notice" role="status" hidden></p>
+<div class="popup-actions"><button id="open-app" class="button primary">Apri le mie pillole <span aria-hidden="true">↗</span></button><button id="test" class="button secondary">Invia una prova</button></div>
+<footer>La prova funziona anche fuori orario.</footer>
+</main></body></html>
