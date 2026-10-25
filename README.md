@@ -4,6 +4,28 @@ Estensione personale per **Microsoft Edge su macOS** che ripropone brevi concett
 
 > **Versione sperimentale 0.1.1.** La prima implementazione è disponibile, ma i test applicativi e il flusso reale non sono ancora stati eseguiti. Una revisione statica ha identificato cinque problemi ancora aperti: leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md) prima dell'uso.
 
+## Anteprima
+
+Schermate dell'interfaccia dell'app con contenuti e orari dimostrativi su **Docker**. Non contengono note del vault personale.
+
+### La scorta
+
+Una raccolta di concetti pronti da leggere: immagini e container, volumi, porte, Compose, build cache e reti.
+
+![Scorta di sei pillole dimostrative su Docker, con il riepilogo degli invii giornalieri](docs/screenshots/scorta-docker.png)
+
+### Una pillola nel dettaglio
+
+Spiegazione del concetto, esempio concreto e collegamento alla nota di origine in Obsidian.
+
+![Dettaglio della pillola su immagini e container Docker, con esempio di comando e collegamento alla fonte](docs/screenshots/pillola-docker.png)
+
+### La notifica desktop
+
+**Anteprima illustrativa**, non una cattura del banner nativo di macOS. Mostra un contenuto dimostrativo su Docker e i campi inviati dall’estensione; impaginazione, icone e testo visibile possono variare in base al sistema. Un clic sulla notifica apre la pillola completa nell’app, da cui si può raggiungere la fonte in Obsidian. Le notifiche di Microsoft Edge devono essere abilitate nelle impostazioni di macOS.
+
+![Anteprima illustrativa di una notifica desktop con una pillola dimostrativa su immagini e container Docker](docs/screenshots/notifica-docker.png)
+
 ## Funzionamento
 
 - Quattro pillole nei feriali: due tra **09:30–12:30** e due tra **14:30–17:30**, fuso **Europe/Rome**.
