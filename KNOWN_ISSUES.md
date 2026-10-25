@@ -1,4 +1,4 @@
-# Problemi noti — 0.1.0 sperimentale
+# Problemi noti — 0.1.x sperimentale
 
 Questi rilievi sono stati confermati tramite revisione statica del codice, non riprodotti a runtime. Sono ancora aperti; pubblicare il repository non significa che l'applicazione sia stata collaudata. I test esistenti non sono ancora stati eseguiti.
 
@@ -20,11 +20,11 @@ Se le esclusioni delle cartelle cambiano mentre l'API delle notifiche è in atte
 
 Da fare: applicare anche nel rollback i filtri correnti e coprire l'interleaving con un test.
 
-## B3 — Catalogo semanticamente non valido
+## B3 — Catalogo nativo semanticamente non valido (percorso precedente)
 
 Il worker controlla solo parte della struttura del catalogo. Una risposta con array notes e count intero ma metadata invalidi può essere accettata come catalogo vuoto e cancellare pillole valide prima della generazione successiva. Non è stato dimostrato che il ponte reale produca una simile risposta.
 
-Da fare: validare il catalogo e tutti i metadata prima di modificare la scorta, preservando i dati se la risposta non è valida.
+Il normale rifornimento costruisce ora il catalogo nel browser dalla cartella autorizzata e non usa questa risposta nativa. Il percorso precedente resta nel ponte per compatibilità; il nuovo flusso richiede comunque collaudo browser e test di regressione.
 
 ## B4 — Recupero di piano e mappa notifiche malformati
 

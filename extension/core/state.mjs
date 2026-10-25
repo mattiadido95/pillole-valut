@@ -7,7 +7,7 @@ export function emptyState() {
   return {
     version: 1, settings: normalizeSettings(), queue: [], history: [], dailyPlan: null,
     completed: [], notificationMap: {}, host: null, lastError: null, retryAfter: 0,
-    lastRefillAt: null, refillStartedAt: null,
+    lastRefillAt: null, refillStartedAt: null, vault: null,
   };
 }
 

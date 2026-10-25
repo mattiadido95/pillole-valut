@@ -44,7 +44,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 Atteso `OK`: bridge e installer in isolamento con processi simulati. Nessuna chiamata AI reale.
 
 ```sh
-node --test tests/schedule.test.mjs tests/state.test.mjs
+node --test tests/schedule.test.mjs tests/state.test.mjs tests/vault.test.mjs
 ```
 
 Atteso zero failure: scheduler e fuso orario. Richiede un Node18+ già disponibile.
@@ -54,3 +54,9 @@ Non è prevista una build: caricare direttamente `extension/`. Per diagnosticare
 ## Raccolta degli esiti
 
 Per ogni comando riporta esito, output rilevante, data e versione runtime. Per la prova UI riporta passaggio, azione, risultato e differenza osservata. Se un controllo pertinente non è eseguito, il checkpoint resta PARZIALE. L'assenza di errori in console non dimostra da sola tutti i requisiti.
+
+## Collegamento del vault nel browser
+
+Dopo Controlla il ponte, scegliere Collega il vault e selezionare la cartella configurata. Atteso un conteggio delle note leggibili, nessuna chiamata Codex dal solo collegamento e nessuna scrittura nelle note. La preparazione deve usare il batch fornito da Edge senza catalogare la cartella attraverso Python. Revocare il consenso o annullare il picker deve lasciare la scorta esistente; dopo una revoca, ricollegare la cartella. Verificare anche ripresa dopo ricarica e apertura della fonte corretta in Obsidian.
+
+`tests/vault.test.mjs` prepara controlli su filtri, hash, handle autorizzati, rifiuti e selezione batch; i casi BrowserInputTests in test_host.py controllano che la generazione da browser non enumeri il vault. Test e UI non sono stati eseguiti dall'agente.

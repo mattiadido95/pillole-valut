@@ -63,10 +63,18 @@ def build_installation(extension_id, vault_path, codex_path=None, home=None):
     host = Path(__file__).resolve().with_name("host.py")
     schema = host.with_name("output-schema.json")
     if not host.is_file() or not schema.is_file():
-        raise InstallError("I file host.py e output-schema.json devono restare nella cartella native_host del progetto.")
+        raise InstallError("Per l'installazione servono host.py e output-schema.json nella cartella native_host del progetto.")
+    try:
+        host_content = host.read_text(encoding="utf-8")
+        schema_content = schema.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        raise InstallError("Impossibile leggere i file del ponte dal progetto. Nessuna registrazione modificata.") from None
     data_dir = user_home / "Library/Application Support/PilloleVault"
+    installed_host = data_dir / "host.py"
+    installed_schema = data_dir / "output-schema.json"
     config_path = data_dir / "config.json"
     launcher_path = data_dir / "native-host"
+    diagnostic_path = data_dir / "native-host-stderr.log"
     manifest_path = user_home / "Library/Application Support/Microsoft Edge/NativeMessagingHosts" / (HOST_NAME + ".json")
     config = {"version": 1, "vaultPath": str(vault), "codexPath": str(codex)}
     manifest = {
@@ -76,10 +84,21 @@ def build_installation(extension_id, vault_path, codex_path=None, home=None):
         "type": "stdio",
         "allowed_origins": ["chrome-extension://" + extension_id + "/"],
     }
-    launcher = "#!/bin/sh\nexec " + " ".join(shlex.quote(str(value)) for value in (python, host, "--config", config_path)) + ' "$@"\n' 
+    # Keep protocol stdout untouched; retain only stderr from the latest start.
+    # The restrictive umask applies when the browser creates the diagnostic file.
+    launcher = (
+        "#!/bin/sh\numask 077\nexec "
+        + " ".join(shlex.quote(str(value)) for value in (python, installed_host, "--config", config_path))
+        + ' "$@" 2> ' + shlex.quote(str(diagnostic_path)) + "\n"
+    )
     return {
+        "hostPath": installed_host,
+        "schemaPath": installed_schema,
+        "hostContent": host_content,
+        "schemaContent": schema_content,
         "configPath": config_path,
         "launcherPath": launcher_path,
+        "diagnosticPath": diagnostic_path,
         "manifestPath": manifest_path,
         "config": config,
         "manifest": manifest,
@@ -126,10 +145,16 @@ def _write_file(path, content, mode, force):
 def install_host(extension_id, vault_path, codex_path=None, force=False, home=None):
     """Register after preflight. `home` enables isolated tests without real user writes."""
     prepared = build_installation(extension_id, vault_path, codex_path, home)
-    destinations = (prepared["configPath"], prepared["launcherPath"], prepared["manifestPath"])
+    destinations = (
+        prepared["hostPath"], prepared["schemaPath"], prepared["configPath"],
+        prepared["launcherPath"], prepared["manifestPath"],
+    )
     for path in destinations:
         _check_destination(path, force)
     try:
+        # Install the runtime outside Documents; Edge need not open the checkout.
+        _write_file(prepared["hostPath"], prepared["hostContent"], 0o600, force)
+        _write_file(prepared["schemaPath"], prepared["schemaContent"], 0o600, force)
         _write_file(prepared["configPath"], json.dumps(prepared["config"], ensure_ascii=False, indent=2) + "\n", 0o600, force)
         _write_file(prepared["launcherPath"], prepared["launcher"], 0o700, force)
         _write_file(prepared["manifestPath"], json.dumps(prepared["manifest"], ensure_ascii=False, indent=2) + "\n", 0o600, force)
@@ -143,7 +168,7 @@ def main(argv=None):
     parser.add_argument("--extension-id", required=True, help="ID da edge://extensions (32 lettere)")
     parser.add_argument("--vault", required=True, type=Path, help="Cartella del vault Obsidian")
     parser.add_argument("--codex", type=Path, help="Percorso Codex CLI; default PATH oppure ~/.local/bin/codex")
-    parser.add_argument("--force", action="store_true", help="Aggiorna esclusivamente i tre file del ponte già registrati")
+    parser.add_argument("--force", action="store_true", help="Aggiorna i file del runtime e la registrazione del ponte già presenti")
     args = parser.parse_args(argv)
     if sys.platform != "darwin":
         print("Questo installer è destinato a macOS con Microsoft Edge Stable.", file=sys.stderr)
@@ -154,8 +179,10 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return 1
     print("Ponte registrato per l'utente corrente. Nessuna generazione avviata.")
+    print("Runtime installato: " + str(result["hostPath"]))
     print("Configurazione: " + str(result["configPath"]))
     print("Manifest Edge: " + str(result["manifestPath"]))
+    print("Log di avvio: " + str(result["diagnosticPath"]))
     print("Ricarica l'estensione in Edge e usa Controlla ponte, poi Prepara scorta.")
     return 0
 

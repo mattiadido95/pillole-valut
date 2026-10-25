@@ -1,6 +1,7 @@
 import { send, dateLabel, nextSlot, notice } from './ui.mjs';
 import { normalizeSettings } from './core/schedule.mjs';
 import { validPill } from './core/state.mjs';
+import { saveVaultHandle } from './core/vault.mjs';
 
 const $ = (id) => document.getElementById(id);
 let latest = null;
@@ -86,13 +87,16 @@ function render(state) {
   $('refill').textContent = state.refilling ? 'Preparazione in corso…' : state.queue.length >= 12 ? 'Aggiorna scorta' : 'Prepara scorta ✦';
   $('test').disabled = !state.queue.length || busy;
   $('check-host').disabled = busy || state.refilling;
+  $('connect-vault').disabled = busy || state.refilling || !state.host;
+  $('connect-vault').textContent = state.vault ? 'Ricollega il vault' : 'Collega il vault';
+  $('vault-connection').textContent = state.vault ? `${state.vault.name}: ${state.vault.count} note leggibili · aggiornato ${dateLabel(state.vault.scannedAt, state.settings.timeZone)}` : 'Seleziona nel browser la cartella del vault indicata qui sotto.';
   $('error-banner').hidden = !state.lastError;
   $('error-text').textContent = state.lastError?.message || '';
   $('extension-id').textContent = state.extensionId;
   const command = `python3 "$HOME/Documents/Progetti/pillole-valut/native_host/install.py" --extension-id "${state.extensionId}" --vault "$HOME/Documents/Obsidian Vault" --codex "$HOME/.local/bin/codex"`;
   $('install-command').textContent = command;
-  $('host-status').textContent = state.host ? state.host.vaultAvailable && state.host.codexAvailable ? 'Collegato · file del vault e della CLI disponibili' : 'Collegato · controlla i percorsi indicati sotto' : 'Non ancora controllato';
-  $('host-vault').textContent = state.host ? `${state.host.vaultAvailable ? '✓' : '✕'} ${state.host.vaultPath}` : '—';
+  $('host-status').textContent = state.host ? state.host.codexAvailable ? 'Ponte collegato · Codex CLI disponibile' : 'Ponte collegato · controlla il percorso Codex CLI' : 'Non ancora controllato';
+  $('host-vault').textContent = state.host ? `${state.host.vaultPath} · ${state.vault ? 'collegato tramite Edge' : 'da collegare in Edge'}` : '—';
   $('host-codex').textContent = state.host ? `${state.host.codexAvailable ? '✓' : '✕'} ${state.host.codexPath}` : '—';
   if (!formDirty) fillSettings(state.settings);
   const listKey = JSON.stringify([state.queue.map((pill) => pill.id), state.history.map((pill) => pill.id), state.settings.timeZone]);
@@ -131,6 +135,27 @@ $('go-setup').addEventListener('click', () => switchView('settings'));
 $('refill').addEventListener('click', () => { void operation(() => send('refill'), 'Scorta aggiornata. Puoi leggere una pillola o inviare una prova.'); });
 $('test').addEventListener('click', () => { void operation(() => send('testNotification'), 'Prova inviata. La scorta e la quota giornaliera sono rimaste intatte. Se non compare, controlla le notifiche di Edge in macOS.'); });
 $('check-host').addEventListener('click', () => { void operation(() => send('checkHost'), 'Controllo del ponte completato. Il login di Codex sarà verificato dalla prima generazione.'); });
+$('connect-vault').addEventListener('click', () => {
+  if (busy || latest?.refilling) return;
+  if (typeof window.showDirectoryPicker !== 'function') {
+    notice('Questa versione di Edge non supporta la selezione della cartella. Apri la pagina dell’estensione in una scheda Edge aggiornata.', true);
+    return;
+  }
+  // The picker must run directly in the user gesture, before any await.
+  let selection;
+  try { selection = window.showDirectoryPicker({ id: 'pillole-vault', mode: 'read' }); }
+  catch (error) { notice(error.message, true); return; }
+  void operation(async () => {
+    let handle;
+    try { handle = await selection; }
+    catch (error) { if (error.name === 'AbortError') return; throw error; }
+    const expectedName = latest?.host?.vaultPath.split('/').filter(Boolean).at(-1);
+    if (expectedName && handle.name !== expectedName) throw new Error(`Seleziona il vault configurato: ${latest.host.vaultPath}`);
+    await saveVaultHandle(handle);
+    const result = await send('indexVault');
+    notice(`Vault collegato: ${result.vault.count} note leggibili. Ora puoi preparare la scorta.`);
+  });
+});
 $('dismiss-error').addEventListener('click', () => { void send('dismissError').then(render).catch((error) => notice(error.message, true)); });
 $('settings-form').addEventListener('input', () => { formDirty = true; });
 $('settings-form').addEventListener('submit', (event) => {

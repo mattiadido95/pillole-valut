@@ -1,6 +1,7 @@
 import { normalizeSettings, buildDailyPlan, canDeliver, dayKey, nextDayTimestamp } from './core/schedule.mjs';
 import { readState, mutateState, recordError, validPill } from './core/state.mjs';
 import { nativeRequest } from './core/native.mjs';
+import { getVaultHandle, scanVault, chooseNotes } from './core/vault.mjs';
 
 const TARGET = 12;
 const LOW = 4;
@@ -64,27 +65,45 @@ async function checkHost() {
   return host;
 }
 
+async function browserCatalog() {
+  const current = await readState();
+  const host = current.host || await checkHost();
+  if (host.browserNotes !== true) throw new Error('Aggiorna il ponte con l’installer e --force, poi premi Controlla il ponte.');
+  const handle = await getVaultHandle();
+  if (!handle) throw new Error('Apri Impostazioni e scegli “Collega il vault” prima di preparare la scorta.');
+  const expectedName = host.vaultPath.split('/').filter(Boolean).at(-1);
+  if (handle.name !== expectedName) throw new Error(`Seleziona lo stesso vault configurato nel ponte: ${host.vaultPath}`);
+  const notes = await scanVault(handle, current.settings.excludeFolders);
+  await mutateState((state) => {
+    state.vault = { name: handle.name, count: notes.length, scannedAt: new Date().toISOString() };
+    state.lastError = null;
+  });
+  return notes;
+}
+
 async function refillStock(manual) {
   const before = await readState();
   if (!manual && (!before.settings.enabled || before.queue.length > LOW || before.retryAfter > Date.now())) return;
   await mutateState((state) => { state.refillStartedAt = new Date().toISOString(); });
   try {
     await checkHost();
-    const current = await readState();
-    const catalog = await nativeRequest('catalog', { excludeFolders: current.settings.excludeFolders });
-    if (!Array.isArray(catalog.notes) || !Number.isInteger(catalog.count)) throw new Error('Il catalogo del ponte non è valido.');
-    const hashes = new Map(catalog.notes.filter((note) => note && typeof note.id === 'string' && typeof note.hash === 'string').map((note) => [note.id, note.hash]));
+    const notes = await browserCatalog();
+    const hashes = new Map(notes.map((note) => [note.id, note.hash]));
     await mutateState((state) => {
-      state.queue = state.queue.filter((pill) => (hashes.has(pill.sourceId) ? hashes.get(pill.sourceId) === pill.sourceHash : catalog.truncated === true) && !excludePath(pill.sourcePath, state.settings.excludeFolders));
+      state.queue = state.queue.filter((pill) => hashes.get(pill.sourceId) === pill.sourceHash && !excludePath(pill.sourcePath, state.settings.excludeFolders));
     });
     for (let batch = 0; batch < 3; batch += 1) {
       const state = await readState();
       if (state.queue.length >= TARGET || (!manual && !state.settings.enabled)) break;
       const excludeNoteIds = [...new Set([...state.queue.map((pill) => pill.sourceId), ...state.history.slice(0, 20).map((pill) => pill.sourceId)])];
+      const candidates = notes.filter((note) => !excludePath(note.path, state.settings.excludeFolders));
+      const selected = chooseNotes(candidates, excludeNoteIds, Math.min(4, TARGET - state.queue.length));
+      if (!selected.length) throw new Error('Nessuna nuova nota adatta: controlla le esclusioni e le note già in scorta o mostrate di recente.');
       const result = await nativeRequest('generate', {
-        count: Math.min(4, TARGET - state.queue.length),
+        count: selected.length,
         excludeFolders: state.settings.excludeFolders,
         excludeNoteIds,
+        notes: selected.map(({ path, hash, text }) => ({ path, hash, text })),
       });
       if (!Array.isArray(result.pills) || !result.pills.length || result.pills.length > 4 || !result.pills.every(validPill)) throw new Error('Codex ha prodotto pillole con un formato non valido.');
       const sourceIds = result.pills.map((pill) => pill.sourceId);
@@ -206,6 +225,7 @@ async function handleMessage(message) {
   switch (message.action) {
     case 'getState': return snapshot();
     case 'checkHost': return checkHost();
+    case 'indexVault': await checkHost(); await browserCatalog(); return snapshot();
     case 'refill': await requestRefill(true); return snapshot();
     case 'testNotification': return testNotification();
     case 'saveSettings': {

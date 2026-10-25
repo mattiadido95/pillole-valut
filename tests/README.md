@@ -13,7 +13,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 Richiede Python 3.9+ già disponibile. Usa soltanto unittest e libreria standard. Prova framing Native Messaging, validazione delle richieste, filtri e symlink, fonti e output modello, confine del processo CLI e registrazione in una home temporanea. La CLI è sostituita da mock; non usa l'account Codex né modifica il vault reale o la registrazione host del Mac. Risultato atteso: casi con `ok` e riepilogo `OK`. `ERROR` indica un problema di import/esecuzione o un'eccezione inattesa; `FAIL` una differenza dal contratto da leggere nel traceback.
 
 ```sh
-node --test tests/schedule.test.mjs tests/state.test.mjs
+node --test tests/schedule.test.mjs tests/state.test.mjs tests/vault.test.mjs
 ```
 
 Usare un Node18+ già disponibile nel PATH. Non servono dipendenze npm. Richiede Node 18+ con node:test e structuredClone. Verifica orari, quote, ritardi, DST e mutazioni persistenti concorrenti, simulando soltanto storage.local. Risultato atteso: zero test falliti; errori di import indicano file/runtime da controllare, differenze di assertion indicano una regressione rispetto al contratto.
@@ -32,7 +32,7 @@ Usare un Node18+ già disponibile nel PATH. Non servono dipendenze npm. Richiede
 ## Checklist manuale sintetica
 
 1. Caricare `extension/` da `edge://extensions` in modalità sviluppatore. Atteso: nessun errore di manifest e automazione inizialmente disabilitata.
-2. Copiare l'ID e registrare l'host con il comando documentato in README.md, senza sudo. Atteso: ID corretto e solo tre file applicativi utente creati.
+2. Copiare l'ID e registrare l'host con il comando documentato in README.md, senza sudo. Atteso: ID corretto e runtime copiato in Application Support e registrazione per l’utente corrente.
 3. Aprire la pagina dell'estensione e controllare il ponte. Atteso: vault e CLI individuati; questo non certifica il login.
 4. Preparare la scorta. Atteso: pillole basate su note reali, sorgente coerente, nessun contenuto demo, errori comprensibili se login/limiti impediscono la generazione.
 5. Inviare una prova anche sabato/sera. Atteso: una notifica con dettaglio al clic; scorta e quota automatica non consumate. Ripetere con permessi notifiche negati: errore visibile, nessuna perdita della scorta.
@@ -43,3 +43,9 @@ Usare un Node18+ già disponibile nel PATH. Non servono dipendenze npm. Richiede
 10. Rendere temporaneamente indisponibile il ponte/vault prima del refill. Atteso: contenuti già salvati conservati; errore e attesa per retry automatico, senza generazioni ripetute in loop.
 
 Non cambiare l'orologio di sistema per queste prove: le funzioni pure consentono di verificare DST e date fisse nei test. Focus/macOS può nascondere una notifica che Edge dichiara creata; controllare anche il Centro Notifiche.
+
+## Collegamento del vault nel browser
+
+Dopo Controlla il ponte, scegliere Collega il vault e selezionare la cartella configurata. Atteso un conteggio delle note leggibili, nessuna chiamata Codex dal solo collegamento e nessuna scrittura nelle note. La preparazione deve usare il batch fornito da Edge senza catalogare la cartella attraverso Python. Revocare il consenso o annullare il picker deve lasciare la scorta esistente; dopo una revoca, ricollegare la cartella. Verificare anche ripresa dopo ricarica e apertura della fonte corretta in Obsidian.
+
+`tests/vault.test.mjs` prepara controlli su filtri, hash, handle autorizzati, rifiuti e selezione batch; i casi BrowserInputTests in test_host.py controllano che la generazione da browser non enumeri il vault. Test e UI non sono stati eseguiti dall'agente.

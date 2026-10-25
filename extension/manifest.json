@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pillole dal vault",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Un concetto dalle tue note Obsidian, ogni tanto. Scorta locale con Codex CLI e notifiche nei giorni lavorativi.",
   "minimum_chrome_version": "120",
   "permissions": [

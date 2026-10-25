@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import tempfile
@@ -61,6 +62,37 @@ class InstallerTests(unittest.TestCase):
         # La lettura controlla presenza delle fonti, senza eseguire il launcher.
         self.assertIn("host.py", launcher.read_text(encoding="utf-8"))
 
+
+    def test_installed_runtime_and_launcher_are_independent_of_source_location(self):
+        sources = self.root / "Documents" / "Example project" / "native_host"
+        sources.mkdir(parents=True)
+        host_content = "# Test runtime fixture; never executed.\n"
+        schema_content = '{"type": "object"}\n'
+        (sources / "host.py").write_text(host_content, encoding="utf-8")
+        (sources / "output-schema.json").write_text(schema_content, encoding="utf-8")
+        with mock.patch.object(installer, "__file__", str(sources / "install.py")):
+            result = self.install()
+        sources.rename(sources.with_name("sources-moved"))
+        self.assertEqual(result["hostPath"].read_text(encoding="utf-8"), host_content)
+        self.assertEqual(result["schemaPath"].read_text(encoding="utf-8"), schema_content)
+        self.assertEqual(result["hostPath"].parent, self.support / "PilloleVault")
+        launcher = result["launcherPath"].read_text(encoding="utf-8")
+        command = next(line for line in launcher.splitlines() if line.startswith("exec "))
+        arguments = shlex.split(command)
+        self.assertEqual(arguments[2], str(result["hostPath"]))
+        self.assertNotIn(str(sources), launcher)
+        self.assertIn("umask 077", launcher)
+        self.assertIn(str(result["diagnosticPath"]), arguments)
+        self.assertIn("2>", arguments)
+
+    def test_existing_manifest_stops_registration_before_runtime_files_are_created(self):
+        self.manifest.parent.mkdir(parents=True)
+        self.manifest.write_text('{"existing": true}\n', encoding="utf-8")
+        before = self.snapshot()
+        with self.assertRaises(installer.InstallError):
+            self.install()
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.support / "PilloleVault" / "host.py").exists())
 
     def test_cli_symlink_remains_stable_across_versioned_binary_changes(self):
         link = self.root / "codex-stable"

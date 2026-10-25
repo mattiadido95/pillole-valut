@@ -29,11 +29,21 @@ export async function nativeRequest(action, payload = {}) {
       });
       port.onDisconnect.addListener(() => {
         const detail = chrome.runtime.lastError?.message;
-        if (!finished) finish(new Error(detail ? 'Ponte non disponibile. Controlla l’installazione e l’ID dell’estensione nella pagina Pillole.' : 'Il ponte locale si è chiuso prima di rispondere.'));
+        if (!finished) {
+          const diagnostic = typeof detail === 'string' && detail.trim()
+            ? ` Dettaglio Edge: ${detail.slice(0, 500)}`
+            : '';
+          const error = new Error(`Il ponte locale non ha risposto.${diagnostic}`);
+          error.code = 'NATIVE_HOST_DISCONNECTED';
+          finish(error);
+        }
       });
       port.postMessage({ id, action, payload });
-    } catch {
-      finish(new Error('Impossibile collegarsi al ponte locale. Completa la configurazione nella pagina Pillole.'));
+    } catch (error) {
+      const diagnostic = typeof error?.message === 'string' && error.message.trim()
+        ? ` Dettaglio Edge: ${error.message.slice(0, 500)}`
+        : '';
+      finish(new Error(`Impossibile collegarsi al ponte locale.${diagnostic}`));
     }
   });
 }

@@ -192,8 +192,22 @@ def list_notes(config, exclude_folders=None, exclude_ids=None):
                 note = _read_note(path, root)
                 if note is not None and note["id"] not in ids:
                     notes.append(note)
-    except OSError:
-        raise HostError("VAULT_UNAVAILABLE", "Non è stato possibile leggere il catalogo del vault.") from None
+    except OSError as error:
+        location = "radice del vault"
+        if isinstance(error.filename, str):
+            try:
+                relative = Path(error.filename).relative_to(root).as_posix()
+                if relative != ".":
+                    location = "sottocartella " + relative[:200]
+            except ValueError:
+                location = "una cartella del vault"
+        reason = " ".join(str(error.strerror or "errore di lettura").split())[:160]
+        code = "[Errno " + str(error.errno) + "] " if error.errno is not None else ""
+        raise HostError(
+            "VAULT_UNAVAILABLE",
+            "Non è stato possibile leggere il catalogo del vault: "
+            + code + reason + " (" + location + ").",
+        ) from None
     return notes
 
 
@@ -250,6 +264,57 @@ def _terminate_child(process):
         pass
 
 
+def _codex_failure_detail(output_log, error_log, notes):
+    """Extract only error events/lines, never normal output or note messages."""
+    def tail(stream):
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(max(0, size - 65536))
+        return stream.read(65536).decode("utf-8", errors="replace")
+
+    events = []
+    for line in tail(output_log).splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(event, dict) or event.get("type") not in ("error", "turn.failed"):
+            continue
+        detail = event.get("error")
+        if isinstance(detail, dict):
+            detail = detail.get("message")
+        if not isinstance(detail, str):
+            detail = event.get("message")
+        if isinstance(detail, str) and detail.strip():
+            events.append(detail)
+    detail = events[-1] if events else ""
+    if not detail:
+        # Parser/startup failures can precede the JSON event stream.
+        for line in reversed(tail(error_log).splitlines()):
+            clean = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line).strip()
+            if re.match(r"^(?:error(?:\s*:|\s+loading\b|\s+parsing\b)|failed to (?:load|parse)\b)", clean, flags=re.IGNORECASE):
+                detail = clean
+                break
+    if not detail:
+        return ""
+    # Avoid echoing note contents even if an error happens to quote input.
+    for note in notes:
+        body = note.get("_body", "")
+        if body:
+            detail = detail.replace(body, "[contenuto della nota]")
+            for line in body.splitlines():
+                if len(line.strip()) >= 12:
+                    detail = detail.replace(line.strip(), "[contenuto della nota]")
+    detail = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", detail)
+    detail = re.sub(r"(?i)\bbearer\s+[^\s\"'<>]+", "Bearer [redacted]", detail)
+    detail = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[redacted]", detail)
+    detail = re.sub(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[redacted]", detail)
+    detail = re.sub(r"""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)["']?\s*[:=]\s*["']?)[^\s"',;&}]+""", r"\1[redacted]", detail)
+    detail = re.sub(r"https?://[^\s<>\"']+", "[endpoint]", detail)
+    detail = re.sub(r"[\x00-\x1f\x7f]", " ", detail)
+    return re.sub(r"\s+", " ", detail).strip()[:360]
+
+
 def _run_codex(config, notes):
     """Run the configured CLI conservatively and parse bounded final output."""
     codex = Path(config["codexPath"])
@@ -260,7 +325,7 @@ def _run_codex(config, notes):
             work = Path(temporary)
             final_path = work / "result.json"
             argv = [
-                str(codex), "--ask-for-approval", "never", "exec",
+                str(codex), "--ask-for-approval", "never", "exec", "--json",
                 "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
                 "--output-schema", str(SCHEMA_PATH),
                 "--output-last-message", str(final_path), "-",
@@ -307,7 +372,13 @@ def _run_codex(config, notes):
                     for signum, previous in previous_handlers.items():
                         signal.signal(signum, previous)
                 if process.returncode != 0:
-                    raise HostError("CODEX_FAILED", "Codex non ha completato la generazione. Verifica login, limiti e compatibilità della CLI dal terminale.")
+                    detail = _codex_failure_detail(output_log, error_log, notes)
+                    message = f"Codex non ha completato la generazione (uscita {process.returncode})."
+                    if detail:
+                        message += " Dettaglio CLI: " + detail
+                    else:
+                        message += " Nessun dettaglio di errore disponibile dalla CLI; verifica il comando dal terminale."
+                    raise HostError("CODEX_FAILED", message)
             if final_path.is_symlink():
                 raise HostError("INVALID_OUTPUT", "Codex ha restituito un risultato non valido.")
             try:
@@ -353,7 +424,44 @@ def _validate_generated_output(raw, notes):
     return validated
 
 
-def generate_pills(config, count=4, exclude_folders=None, exclude_ids=None):
+def _notes_from_browser(provided, exclude_folders=None, exclude_ids=None):
+    """Validate selected note text supplied by the authorized extension page.
+
+    This route never enumerates the vault: browser consent covers directory reads.
+    """
+    folders, excluded = _validate_exclusions(exclude_folders, exclude_ids)
+    if not isinstance(provided, list) or not 1 <= len(provided) <= 4:
+        raise HostError("INVALID_REQUEST", "Fornisci da una a quattro note selezionate nel browser.")
+    notes = []
+    seen = set()
+    for item in provided:
+        if not isinstance(item, dict) or set(item) != {"path", "hash", "text"}:
+            raise HostError("INVALID_REQUEST", "Formato della nota dal browser non valido.")
+        relative = item["path"]
+        body = item["text"]
+        source_hash = item["hash"]
+        if not isinstance(relative, str) or not 1 <= len(relative) <= 2000 or "\\" in relative or re.search(r"[\x00-\x1f]", relative):
+            raise HostError("INVALID_REQUEST", "Percorso della nota dal browser non valido.")
+        path = PurePosixPath(relative)
+        if path.is_absolute() or any(part in ("", ".", "..") for part in relative.split("/")) or any(_ignored_name(part) for part in path.parts) or path.suffix.casefold() != ".md":
+            raise HostError("INVALID_REQUEST", "La nota selezionata non ha un percorso relativo valido.")
+        if _folder_excluded(path, folders):
+            raise HostError("INVALID_REQUEST", "La nota selezionata appartiene a una cartella esclusa.")
+        if not isinstance(source_hash, str) or re.fullmatch(r"[a-f0-9]{64}", source_hash) is None:
+            raise HostError("INVALID_REQUEST", "Hash della nota dal browser non valido.")
+        if not isinstance(body, str) or not 80 <= len(body) <= MAX_NOTE_CHARACTERS or "\x00" in body:
+            raise HostError("INVALID_REQUEST", "Testo della nota dal browser non valido.")
+        source_id = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:24]
+        if source_id in seen or source_id in excluded:
+            raise HostError("INVALID_REQUEST", "Fonte duplicata o esclusa nella selezione del browser.")
+        heading = re.search(r"^#\s+(.+?)\s*#*\s*$", body, flags=re.MULTILINE)
+        title = heading.group(1).strip() if heading else path.stem
+        notes.append({"id": source_id, "title": re.sub(r"\s+", " ", title)[:240], "path": relative, "hash": source_hash, "_body": body})
+        seen.add(source_id)
+    return notes
+
+
+def generate_pills(config, count=4, exclude_folders=None, exclude_ids=None, provided_notes=None):
     if type(count) is not int or not 1 <= count <= 4:
         raise HostError("INVALID_REQUEST", "Il batch deve contenere da una a quattro pillole.")
     config = _config_values(config)
@@ -361,14 +469,18 @@ def generate_pills(config, count=4, exclude_folders=None, exclude_ids=None):
     codex = Path(config["codexPath"])
     if not codex.is_file() or not os.access(str(codex), os.X_OK):
         raise HostError("CODEX_UNAVAILABLE", "Codex CLI non è disponibile nel percorso configurato.")
-    notes = list_notes(config, exclude_folders, exclude_ids)
+    notes = (
+        list_notes(config, exclude_folders, exclude_ids)
+        if provided_notes is None
+        else _notes_from_browser(provided_notes, exclude_folders, exclude_ids)
+    )
     if not notes:
         raise HostError("NO_NOTES", "Nessuna nuova nota adatta: controlla esclusioni, contenuti e note già in scorta o mostrate di recente.")
     selected = random.SystemRandom().sample(notes, min(count, len(notes)))
     generated = _validate_generated_output(_run_codex(config, selected), selected)
     selected_by_id = {note["id"]: note for note in selected}
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
-    root = Path(config["vaultPath"]).resolve()
+    root = Path(config["vaultPath"]) if provided_notes is not None else Path(config["vaultPath"]).resolve()
     pills = []
     for entry in generated:
         source = selected_by_id[entry["sourceId"]]
@@ -411,6 +523,7 @@ def process_request(request, config):
             codex = Path(config["codexPath"])
             result = {
                 "version": PROTOCOL_VERSION,
+                "browserNotes": True,
                 "vaultPath": config["vaultPath"],
                 "codexPath": config["codexPath"],
                 "vaultAvailable": Path(config["vaultPath"]).is_dir() and os.access(config["vaultPath"], os.R_OK | os.X_OK),
@@ -421,9 +534,9 @@ def process_request(request, config):
                 raise HostError("INVALID_REQUEST", "Parametri catalogo non validi.")
             result = _catalog_result(list_notes(config, payload.get("excludeFolders")))
         elif action == "generate":
-            if set(payload) - {"count", "excludeFolders", "excludeNoteIds"}:
+            if set(payload) - {"count", "excludeFolders", "excludeNoteIds", "notes"}:
                 raise HostError("INVALID_REQUEST", "Parametri generazione non validi.")
-            result = generate_pills(config, payload.get("count", 4), payload.get("excludeFolders"), payload.get("excludeNoteIds"))
+            result = generate_pills(config, payload.get("count", 4), payload.get("excludeFolders"), payload.get("excludeNoteIds"), provided_notes=payload.get("notes"))
         else:
             raise HostError("UNKNOWN_ACTION", "Azione del ponte non supportata.")
         return {"id": request_id, "ok": True, "result": result}

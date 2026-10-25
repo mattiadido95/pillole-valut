@@ -299,6 +299,41 @@ class GenerationTests(VaultFixture):
         self.assertNotIn("PRIVATE-RAW-CONTENT", json.dumps(response))
 
 
+class BrowserInputTests(VaultFixture):
+    def setUp(self):
+        super().setUp()
+        self.browser_note = {
+            "path": "Concetti/Nota browser.md",
+            "hash": "a" * 64,
+            "text": "# Una nozione\n\n" + "Testo da una cartella autorizzata nel browser. " * 5,
+        }
+
+    def test_browser_generation_never_enumerates_the_vault(self):
+        identity = host.hashlib.sha256(self.browser_note["path"].encode("utf-8")).hexdigest()[:24]
+        output = {"pills": [{"sourceId": identity, "title": "Una nozione", "summary": "Spiegazione della fonte selezionata.", "example": ""}]}
+        with mock.patch.object(host, "list_notes", side_effect=AssertionError("Native vault enumeration is forbidden")), mock.patch.object(host, "_run_codex", return_value=output):
+            result = host.generate_pills(self.config, count=1, provided_notes=[self.browser_note])
+        pill = result["pills"][0]
+        self.assertEqual(pill["sourceId"], identity)
+        self.assertEqual(pill["sourceHash"], self.browser_note["hash"])
+        self.assertEqual(parse_qs(urlparse(pill["sourceUrl"]).query)["path"], [str(self.vault / self.browser_note["path"])])
+
+    def test_browser_paths_and_hashes_are_validated_before_cli(self):
+        for relative in ["../Private.md", "/tmp/Private.md", ".private/Note.md", "A/../../Private.md", "_Template.md"]:
+            entry = dict(self.browser_note, path=relative)
+            with self.subTest(relative=relative), self.assertRaises(host.HostError) as raised:
+                host._notes_from_browser([entry])
+            self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        with self.assertRaises(host.HostError):
+            host._notes_from_browser([dict(self.browser_note, hash="invalid")])
+
+    def test_duplicate_or_excluded_browser_notes_are_rejected(self):
+        with self.assertRaises(host.HostError):
+            host._notes_from_browser([self.browser_note, self.browser_note])
+        with self.assertRaises(host.HostError):
+            host._notes_from_browser([self.browser_note], exclude_folders=["Concetti"])
+
+
 class CliBoundaryTests(VaultFixture):
     def setUp(self):
         super().setUp()
@@ -351,6 +386,46 @@ class CliBoundaryTests(VaultFixture):
         self.assertIn(self.notes[0]["id"].encode("utf-8"), calls["input"])
         self.assertNotEqual(calls["kwargs"]["stdout"], subprocess.PIPE)
         self.assertNotEqual(calls["kwargs"]["stderr"], subprocess.PIPE)
+
+    def test_cli_json_error_is_returned_without_note_output_or_credentials(self):
+        calls, launch = self.fake_success(b"")
+        secret_note = self.notes[0]["_body"]
+
+        def failing_launch(argv, **kwargs):
+            process = launch(argv, **kwargs)
+            process.returncode = 1
+
+            def communicate(input=None, timeout=None):
+                kwargs["stdout"].write((json.dumps({"type": "item.completed", "item": {"text": "PRIVATE-NORMAL-OUTPUT"}}) + "\n").encode())
+                kwargs["stdout"].write((json.dumps({"type": "turn.failed", "error": {"message": "401 Unauthorized Bearer PRIVATE-TOKEN api_key=PRIVATE-KEY sk-test-secret; " + secret_note}}) + "\n").encode())
+                return (None, None)
+
+            process.communicate.side_effect = communicate
+            return process
+
+        with mock.patch.object(host.subprocess, "Popen", side_effect=failing_launch):
+            with self.assertRaises(host.HostError) as raised:
+                host._run_codex(self.config, self.notes)
+        message = str(raised.exception)
+        self.assertIn("--json", calls["argv"])
+        self.assertIn("uscita 1", message)
+        self.assertIn("401 Unauthorized", message)
+        self.assertNotIn("PRIVATE", message)
+        self.assertNotIn(secret_note, message)
+        self.assertNotIn("sk-test-secret", message)
+
+    def test_startup_error_uses_stderr_error_line_without_other_output(self):
+        output = io.BytesIO(b'{"type":"item.completed","item":{"text":"PRIVATE-NOTE"}}\n')
+        error = io.BytesIO(b"PRIVATE-DIAGNOSTIC\nerror: unexpected argument '--ephemeral' found\nUsage: codex exec\n")
+        self.assertEqual(host._codex_failure_detail(output, error, self.notes), "error: unexpected argument '--ephemeral' found")
+
+    def test_unknown_or_malformed_logs_do_not_become_user_errors(self):
+        detail = host._codex_failure_detail(
+            io.BytesIO(b"PRIVATE-RAW-CONTENT\n[]\nnull\n"),
+            io.BytesIO(b"PRIVATE-STDERR\n"),
+            self.notes,
+        )
+        self.assertEqual(detail, "")
 
     def test_timeout_terminates_child_process_group_without_real_process(self):
         process = mock.Mock()
